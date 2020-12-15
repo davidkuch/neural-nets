@@ -1,0 +1,149 @@
+import numpy as np
+import random
+import pickle
+import gzip
+
+
+def load_data():
+    path = r'C:\Users\david\Desktop\input\db\mnist.pkl.gz'
+    f = gzip.open(path, 'rb')
+    u = pickle.Unpickler(f, encoding='latin1')
+    training_data, validation_data, test_data = u.load()
+    f.close()
+    return (training_data, validation_data, test_data)
+
+
+def load_data_wrapper():
+    tr_d, va_d, te_d = load_data()
+    training_inputs = [np.reshape(x, (784, 1)) for x in tr_d[0]]
+    training_results = [vectorized_result(y) for y in tr_d[1]]
+    training_data = zip(training_inputs, training_results)
+    validation_inputs = [np.reshape(x, (784, 1)) for x in va_d[0]]
+    validation_data = zip(validation_inputs, va_d[1])
+    test_inputs = [np.reshape(x, (784, 1)) for x in te_d[0]]
+    test_data = zip(test_inputs, te_d[1])
+    return (training_data, validation_data, test_data)
+
+
+def vectorized_result(j):
+    e = np.zeros((10, 1))
+    e[j] = 1.0
+    return e
+
+# implements a neural network, learning with gradient descent
+
+
+class NN1:
+    # arc is a tuple with the architecture- number of neurons on each layer
+    # first layer is for the input, and would get a setup of its own
+    # biases - list of numpy  1d arrays, an array for each layer except the first(input)
+    # weights - list of numpy  2d arrays, an array for each layer expect the first(input)
+    def __init__(self, arc):
+        self.arc = arc
+        self.depth = len(arc)
+        self.biases = [np.random.randn(y, 1) for y in arc[1:]]
+        self.weights = [np.random.randn(y, x) for (x, y) in zip(arc[:-1], arc[1:])]
+
+    # parameter x = an array with the length of layer one. the input for this turn
+    # no check included to ensure that!--
+    # returns the output of the net for this input- a vector with output-layer length
+    # not for training! just for actual use
+    def feedforward(self, x):
+        # vectorised operation: similar to the component-wise logic
+        for b, w in zip(self.biases, self.weights):
+            x = self.sigmoid(np.dot(w, x) + b)
+        return x
+
+    # utility functions for the use of the "backprop" method
+    # the activation function
+    def sigmoid(self,z):
+        return 1.0 / (1.0 + np.exp(-z))
+
+    def sigmoid_prime(self, z):
+        return self.sigmoid(z) * (1 - self.sigmoid(z))
+
+    def cost_derivative(self, output_activation, y):
+        return output_activation - y
+
+    # takes x - input, and y- desired output
+    # returns error per layer- weights and biases, as lists of arrays(2d,1d)
+    def backprop(self, x, y):
+        # the output gradients would in the shape of weights and biases
+        # here we initiate them with 0's
+        grad_b = [np.zeros(b.shape) for b in self.biases]
+        grad_w = [np.zeros(w.shape) for w in self.weights]
+        activation = x
+        activations = [x]  # activations list, per layer. first is the input
+        zs = []  # list of z (weights*inputs+bias) vectors per layer
+        # feedforward- with storing the mid-values
+        for b, w in zip(self.biases, self.weights):
+            z = np.dot(w, activation) + b
+            zs.append(z)
+            activation = self.sigmoid(z)
+            activations.append(activation)
+        # backward pass
+        delta = self.cost_derivative(activations[-1], y) * \
+            self.sigmoid_prime(zs[-1])  # error for last layer
+        grad_b[-1] = delta  # by definition, bias gradient equals error
+        grad_w[-1] = np.dot(delta, activations[-2].transpose())  # by definition
+        for i in range(2, self.depth):
+            z = zs[-i]
+            sp = self.sigmoid_prime(z)
+            delta = np.dot(self.weights[-i + 1].transpose(), delta) * sp
+            grad_b[-i] = delta
+            grad_w[-i] = np.dot(delta, activations[-i - 1].transpose())
+        return grad_b, grad_w
+
+    def update_mini_batch(self, mini_batch, eta):
+        # Update  weights and biases by
+        # gradient descent using backprop to a single mini batch.
+        # The ``mini_batch`` is a list of tuples ``(x, y)``, and ``eta``
+        # is the learning rate.
+        grad_b = [np.zeros(b.shape) for b in self.biases]
+        grad_w = [np.zeros(w.shape) for w in self.weights]
+        for x, y in mini_batch:
+            delta_grad_b, delta_grad_w = self.backprop(x, y)
+            grad_b = [nb+dnb for nb, dnb in zip(grad_b, delta_grad_b)]
+            grad_w = [nw+dnw for nw, dnw in zip(grad_w, delta_grad_w)]
+        self.weights = [w-(eta/len(mini_batch))*nw
+                        for w, nw in zip(self.weights, grad_w)]
+        self.biases = [b-(eta/len(mini_batch))*nb
+                       for b, nb in zip(self.biases, grad_b)]
+
+    def evaluate(self, test_data):
+        test_results = [(np.argmax(self.feedforward(x)), y)
+                        for (x, y) in test_data]
+        return sum(int(x == y) for (x, y) in test_results)
+
+    def sgd(self, training_data, epochs, mini_batch_size, eta,
+            test_data=None):
+        training_data = list(training_data)
+        n = len(training_data)
+
+        if test_data:
+            test_data = list(test_data)
+            n_test = len(test_data)
+
+        for j in range(epochs):
+            random.shuffle(training_data)
+            mini_batches = [
+                training_data[k:k + mini_batch_size]
+                for k in range(0, n, mini_batch_size)]
+            for mini_batch in mini_batches:
+                self.update_mini_batch(mini_batch, eta)
+            if test_data:
+                print("Epoch {} : {} / {}".format(j, self.evaluate(test_data), n_test));
+            else:
+                print("Epoch {} complete".format(j))
+
+
+arc = (784, 30, 10)
+net1 = NN1(arc)
+
+# training_data, validation_data, test_data = load_data_wrapper()
+# net1.sgd(training_data, 30, 10, 3.0, test_data=test_data)
+print(" end of processing:")
+print("weights are")
+print(net1.weights)
+print("biases are:")
+print(net1.biases)
